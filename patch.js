@@ -1518,7 +1518,7 @@ console.log('Applied AIOMetadata recommendation-card enrichment successfully.');
 // catalog route too.
 replaceOnce(
   '/usr/src/app/src/routes/api.js',
-  "const path = require('path');",
+  "const path = require('path');\nconst axios = require('axios');",
   `const path = require('path');
 const axios = require('axios');
 
