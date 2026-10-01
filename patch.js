@@ -672,6 +672,100 @@ replaceOnce(
 
 console.log('Applied Trakt web-client private recommendation service fix successfully.');
 
+// 14) Supported fallback: if direct recommendations are unavailable/empty,
+// resolve any user Smart List whose source is "recommendations".
+replaceOnce(
+  '/usr/src/app/src/integrations/trakt.js',
+  `        requestUrl = \`https://apiz.trakt.tv/\${effectiveItemTypeForEndpoint === 'series' ? 'shows' : 'movies'}/recommendations\`;
+        // Match the current Trakt web client's recommendation request defaults.
+        params = {
+          limit,
+          extended: 'full,images,colors',
+          ignore_collected: true,
+          ignore_watched: true
+        };`,
+  `        // Use the documented/public recommendation API first. The private
+        // apiz.trakt.tv service is restricted to Trakt's own web client.
+        requestUrl = \`\${TRAKT_API_URL}/recommendations/\${effectiveItemTypeForEndpoint === 'series' ? 'shows' : 'movies'}/\`;
+        params = {
+          limit,
+          extended: 'full',
+          ignore_collected: true,
+          ignore_watched: true
+        };`
+);
+
+replaceOnce(
+  '/usr/src/app/src/integrations/trakt.js',
+  `        if (response.status >= 200 && response.status < 300 && Array.isArray(response.data)) {
+          rawTraktEntries = response.data;
+        } else if (response.status === 401 && !isPublicImport) {`,
+  `        if (response.status >= 200 && response.status < 300 && Array.isArray(response.data)) {
+          rawTraktEntries = response.data;
+
+          // Current public recommendation endpoints can return [] even when
+          // Trakt's website has personalized recommendations. Try a supported
+          // Smart List source="recommendations" fallback if the user has one.
+          if (listId.startsWith('trakt_recommendations_') && rawTraktEntries.length === 0) {
+            try {
+              const smartListsResponse = await axios.get(
+                \`\${TRAKT_API_URL}/users/me/smart-lists\`,
+                { headers, timeout: 10000, validateStatus: () => true }
+              );
+
+              const wantedMediaType = effectiveItemTypeForEndpoint === 'series' ? 'shows' : 'movies';
+              const smartLists = Array.isArray(smartListsResponse.data) ? smartListsResponse.data : [];
+              const match = smartLists.find((list) =>
+                list &&
+                list.source === 'recommendations' &&
+                (list.media_type === wantedMediaType || list.media_type === 'media')
+              );
+
+              console.log('[TRAKT RECS] smart-list discovery', {
+                status: smartListsResponse.status,
+                totalSmartLists: smartLists.length,
+                matchingRecommendationList: match ? {
+                  name: match.name,
+                  slug: match.ids?.slug,
+                  media_type: match.media_type
+                } : null
+              });
+
+              if (match?.ids?.slug) {
+                const smartItemsResponse = await axios.get(
+                  \`\${TRAKT_API_URL}/smart-lists/\${encodeURIComponent(match.ids.slug)}/items\`,
+                  {
+                    headers,
+                    params: { page, limit, extended: 'full' },
+                    timeout: 10000,
+                    validateStatus: () => true
+                  }
+                );
+
+                console.log('[TRAKT RECS] smart-list items', {
+                  slug: match.ids.slug,
+                  status: smartItemsResponse.status,
+                  count: Array.isArray(smartItemsResponse.data) ? smartItemsResponse.data.length : null
+                });
+
+                if (
+                  smartItemsResponse.status >= 200 &&
+                  smartItemsResponse.status < 300 &&
+                  Array.isArray(smartItemsResponse.data)
+                ) {
+                  rawTraktEntries = smartItemsResponse.data;
+                }
+              }
+            } catch (smartListError) {
+              console.error('[TRAKT RECS] smart-list fallback failed:', smartListError.message);
+            }
+          }
+        } else if (response.status === 401 && !isPublicImport) {`
+);
+
+console.log('Applied supported Trakt Smart List recommendations fallback successfully.');
+
+
 
 
 
