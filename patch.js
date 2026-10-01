@@ -513,5 +513,91 @@ replaceOnce(
 
 console.log('Applied current Trakt recommendations compatibility fix successfully.');
 
+// 10) Make Trakt Watchlist a Library catalog and add robust recommendation diagnostics/fallback.
+replaceOnce(
+  '/usr/src/app/src/addon/addonBuilder.js',
+  `    if (currentListId === 'trakt_recommendations_movies') {
+      customUserDefinedType = 'movie';
+      sourceHasMovies = true;
+      sourceHasShows = false;
+    } else if (currentListId === 'trakt_recommendations_shows') {
+      customUserDefinedType = 'series';
+      sourceHasMovies = false;
+      sourceHasShows = true;
+    }`,
+  `    if (currentListId === 'trakt_recommendations_movies') {
+      customUserDefinedType = 'movie';
+      sourceHasMovies = true;
+      sourceHasShows = false;
+    } else if (currentListId === 'trakt_recommendations_shows') {
+      customUserDefinedType = 'series';
+      sourceHasMovies = false;
+      sourceHasShows = true;
+    } else if (currentListId === 'trakt_watchlist') {
+      customUserDefinedType = 'library';
+      sourceHasMovies = true;
+      sourceHasShows = true;
+    }`
+);
+
+replaceOnce(
+  '/usr/src/app/src/addon/addonBuilder.js',
+  `  const allKnownTypes = new Set(['movie', 'series', 'all']);`,
+  `  const allKnownTypes = new Set(['movie', 'series', 'all', 'library']);`
+);
+
+replaceOnce(
+  '/usr/src/app/src/integrations/trakt.js',
+  `    if (requestUrl) { 
+        const response = await axios.get(requestUrl, { headers, params });
+        if (Array.isArray(response.data)) {
+            rawTraktEntries = response.data;
+        }
+    }`,
+  `    if (requestUrl) {
+        const response = await axios.get(requestUrl, { headers, params, validateStatus: () => true });
+
+        if (listId.startsWith('trakt_recommendations_')) {
+          console.log('[TRAKT RECS] response', {
+            listId,
+            url: requestUrl,
+            status: response.status,
+            count: Array.isArray(response.data) ? response.data.length : null,
+            sampleKeys: Array.isArray(response.data) && response.data[0] ? Object.keys(response.data[0]) : []
+          });
+        }
+
+        if (response.status >= 200 && response.status < 300 && Array.isArray(response.data)) {
+          rawTraktEntries = response.data;
+        } else if (response.status === 401 && !isPublicImport) {
+          // One retry after forcing token initialization/refresh.
+          const ready = await initTraktApi(userConfig);
+          if (ready && userConfig.traktAccessToken) {
+            headers['Authorization'] = \`Bearer \${userConfig.traktAccessToken}\`;
+            const retry = await axios.get(requestUrl, { headers, params, validateStatus: () => true });
+            if (listId.startsWith('trakt_recommendations_')) {
+              console.log('[TRAKT RECS] retry', {
+                listId,
+                status: retry.status,
+                count: Array.isArray(retry.data) ? retry.data.length : null
+              });
+            }
+            if (retry.status >= 200 && retry.status < 300 && Array.isArray(retry.data)) {
+              rawTraktEntries = retry.data;
+            }
+          }
+        } else {
+          console.error('[TraktIntegration] Non-success response', {
+            listId,
+            status: response.status,
+            data: response.data
+          });
+        }
+    }`
+);
+
+console.log('Applied Trakt recommendation diagnostics and Library watchlist type fix successfully.');
+
+
 
 
