@@ -974,3 +974,70 @@ replaceOnce(
 );
 
 console.log('Applied Trakt Recommendation Smart List initializer button successfully.');
+
+
+// 16) Diagnose whether the connected OAuth account actually has watch history.
+// This distinguishes "wrong/empty account" from "Trakt recommendations unavailable to third-party API".
+replaceOnce(
+  '/usr/src/app/src/integrations/trakt.js',
+  `              if (match?.ids?.slug) {
+                const smartItemsResponse = await axios.get(`,
+  `              if (match?.ids?.slug) {
+                const smartItemsResponse = await axios.get(`
+);
+
+replaceOnce(
+  '/usr/src/app/src/integrations/trakt.js',
+  `                if (
+                  smartItemsResponse.status >= 200 &&
+                  smartItemsResponse.status < 300 &&
+                  Array.isArray(smartItemsResponse.data)
+                ) {
+                  rawTraktEntries = smartItemsResponse.data;
+                }
+              }
+            } catch (smartListError) {`,
+  `                if (
+                  smartItemsResponse.status >= 200 &&
+                  smartItemsResponse.status < 300 &&
+                  Array.isArray(smartItemsResponse.data)
+                ) {
+                  rawTraktEntries = smartItemsResponse.data;
+                }
+              }
+
+              if (rawTraktEntries.length === 0) {
+                try {
+                  const [settingsDiag, movieHistoryDiag, showHistoryDiag] = await Promise.all([
+                    axios.get(
+                      \`\${TRAKT_API_URL}/users/settings\`,
+                      { headers, timeout: 10000, validateStatus: () => true }
+                    ),
+                    axios.get(
+                      \`\${TRAKT_API_URL}/users/me/history/movies\`,
+                      { headers, params: { page: 1, limit: 1 }, timeout: 10000, validateStatus: () => true }
+                    ),
+                    axios.get(
+                      \`\${TRAKT_API_URL}/users/me/history/shows\`,
+                      { headers, params: { page: 1, limit: 1 }, timeout: 10000, validateStatus: () => true }
+                    )
+                  ]);
+
+                  console.log('[TRAKT DIAG] connected account', {
+                    settingsStatus: settingsDiag.status,
+                    username: settingsDiag.data?.user?.username || null,
+                    name: settingsDiag.data?.user?.name || null,
+                    uuid: settingsDiag.data?.user?.ids?.uuid || null,
+                    movieHistoryStatus: movieHistoryDiag.status,
+                    movieHistoryCount: Number(movieHistoryDiag.headers?.['x-pagination-item-count'] ?? (Array.isArray(movieHistoryDiag.data) ? movieHistoryDiag.data.length : 0)),
+                    showHistoryStatus: showHistoryDiag.status,
+                    showHistoryCount: Number(showHistoryDiag.headers?.['x-pagination-item-count'] ?? (Array.isArray(showHistoryDiag.data) ? showHistoryDiag.data.length : 0))
+                  });
+                } catch (diagError) {
+                  console.error('[TRAKT DIAG] failed:', diagError.message);
+                }
+              }
+            } catch (smartListError) {`
+);
+
+console.log('Applied connected-account and watch-history diagnostics successfully.');
