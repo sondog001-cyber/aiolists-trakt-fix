@@ -1321,3 +1321,15 @@ replaceOnce(
 );
 
 console.log('Applied 40-item Trakt recommendation scrolling successfully.');
+
+
+// 20) Make AIOLists catalog-only so full metadata is resolved by the user's
+// dedicated metadata addon (e.g. AIOMetadata). Catalog responses still contain
+// the required Stremio meta previews; AIOLists simply stops advertising a meta resource.
+replaceOnce(
+  '/usr/src/app/src/addon/addonBuilder.js',
+  `    resources: ['catalog', 'meta'],`,
+  `    resources: ['catalog'],`
+);
+
+console.log('Applied catalog-only manifest for external metadata addon handoff successfully.');
