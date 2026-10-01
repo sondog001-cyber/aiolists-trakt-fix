@@ -598,6 +598,45 @@ replaceOnce(
 
 console.log('Applied Trakt recommendation diagnostics and Library watchlist type fix successfully.');
 
+// 11) Add end-to-end catalog diagnostics and allow TMDB IDs when IMDb is absent.
+replaceOnce(
+  '/usr/src/app/src/integrations/trakt.js',
+  `        const imdbId = itemDataForDetails.ids?.imdb;
+        if (!imdbId) return null; 
+  
+        return {
+          imdb_id: imdbId, tmdb_id: itemDataForDetails.ids?.tmdb, title: itemDataForDetails.title,`,
+  `        const imdbId = itemDataForDetails.ids?.imdb;
+        const tmdbId = itemDataForDetails.ids?.tmdb;
+        if (!imdbId && !tmdbId) return null;
+
+        return {
+          id: imdbId || (tmdbId ? \`tmdb:\${tmdbId}\` : null),
+          imdb_id: imdbId || null, tmdb_id: tmdbId, title: itemDataForDetails.title,`
+);
+
+replaceOnce(
+  '/usr/src/app/src/addon/addonBuilder.js',
+  `    let metas = await convertToStremioFormat(enrichedResult, userConfig.rpdbApiKey, metadataConfig);
+    const convertEndTime = Date.now();`,
+  `    let metas = await convertToStremioFormat(enrichedResult, userConfig.rpdbApiKey, metadataConfig);
+    const convertEndTime = Date.now();
+
+    if (id === 'trakt_recommendations_movies' || id === 'trakt_recommendations_shows') {
+      console.log('[TRAKT RECS] catalog pipeline', {
+        id,
+        rawCount: itemsResult?.allItems?.length || 0,
+        enrichedCount: enrichedItems?.length || 0,
+        convertedCount: metas?.length || 0,
+        requestedType: type,
+        sample: metas?.[0] ? { id: metas[0].id, type: metas[0].type, name: metas[0].name } : null
+      });
+    }`
+);
+
+console.log('Applied Trakt recommendation pipeline diagnostics and TMDB ID fallback successfully.');
+
+
 
 
 
