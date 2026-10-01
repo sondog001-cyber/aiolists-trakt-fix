@@ -1282,3 +1282,42 @@ replaceOnce(
 );
 
 console.log('Applied explicit Trakt website-username diagnostics successfully.');
+
+
+// 19) Recommendation paging: fetch up to Trakt's supported 100-result pool,
+// but return 40 items per Stremio scroll page using the request's skip value.
+// Other AIOLists catalogs keep their existing page size.
+replaceOnce(
+  '/usr/src/app/src/integrations/trakt.js',
+  `        params = {
+          limit,
+          extended: 'full',
+          ignore_collected: true,
+          ignore_watched: true
+        };`,
+  `        params = {
+          limit: isMetadataCheck ? 1 : 100,
+          extended: 'full',
+          ignore_collected: true,
+          ignore_watched: true
+        };`
+);
+
+replaceOnce(
+  '/usr/src/app/src/integrations/trakt.js',
+  `      const initialItems = rawTraktEntries.map(entry => {`,
+  `      if (listId.startsWith('trakt_recommendations_') && !isMetadataCheck) {
+        const recommendationPageSize = 40;
+        rawTraktEntries = rawTraktEntries.slice(skip, skip + recommendationPageSize);
+        console.log('[TRAKT RECS] page', {
+          listId,
+          skip,
+          pageSize: recommendationPageSize,
+          returned: rawTraktEntries.length
+        });
+      }
+
+      const initialItems = rawTraktEntries.map(entry => {`
+);
+
+console.log('Applied 40-item Trakt recommendation scrolling successfully.');
