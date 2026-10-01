@@ -1511,3 +1511,181 @@ replaceOnce(
 );
 
 console.log('Applied AIOMetadata recommendation-card enrichment successfully.');
+
+
+// 23) Stremio's configured catalog URL is served by src/routes/api.js, not the
+// SDK handler in addonBuilder.js. Apply the AIOMetadata bridge to that real
+// catalog route too.
+replaceOnce(
+  '/usr/src/app/src/routes/api.js',
+  "const path = require('path');",
+  `const path = require('path');
+const axios = require('axios');
+
+const AIOMETA_BASE_URL = (process.env.AIOMETA_BASE_URL || 'https://aiometadata.fortheweak.cloud').replace(/\\/+$/, '');
+const AIOMETA_USER_UUID = (process.env.AIOMETA_USER_UUID || '').trim();
+const AIOMETA_API_CACHE_TTL_MS = 5 * 60 * 1000;
+const AIOMETA_API_CONCURRENCY = 6;
+const aioMetaApiPreviewCache = new Map();
+
+async function enrichApiRecommendationItemsWithAioMeta(items) {
+  if (!Array.isArray(items) || items.length === 0) return items || [];
+
+  if (!AIOMETA_USER_UUID) {
+    console.warn('[AIOMETA API] AIOMETA_USER_UUID is not available at runtime');
+    return items;
+  }
+
+  const results = new Array(items.length);
+  let cursor = 0;
+  let attempted = 0;
+  let succeeded = 0;
+  let posterChanged = 0;
+  const statusCounts = {};
+
+  async function worker() {
+    while (true) {
+      const index = cursor++;
+      if (index >= items.length) return;
+
+      const item = items[index];
+      const itemId = item?.imdb_id || item?.id;
+      const itemType = item?.type === 'series' ? 'series' : 'movie';
+
+      if (!itemId || (!String(itemId).startsWith('tt') && !String(itemId).startsWith('tmdb:'))) {
+        results[index] = item;
+        continue;
+      }
+
+      const cacheKey = \`\${itemType}:\${itemId}\`;
+      const cached = aioMetaApiPreviewCache.get(cacheKey);
+      if (cached && (Date.now() - cached.timestamp) < AIOMETA_API_CACHE_TTL_MS) {
+        const merged = { ...item, ...cached.meta, id: itemId, type: item.type };
+        results[index] = merged;
+        if (cached.meta?.poster && cached.meta.poster !== item.poster) posterChanged++;
+        continue;
+      }
+
+      try {
+        attempted++;
+        const url = \`\${AIOMETA_BASE_URL}/stremio/\${encodeURIComponent(AIOMETA_USER_UUID)}/meta/\${itemType}/\${encodeURIComponent(itemId)}.json\`;
+        const response = await axios.get(url, {
+          timeout: 10000,
+          validateStatus: () => true
+        });
+        statusCounts[response.status] = (statusCounts[response.status] || 0) + 1;
+
+        const meta = response.status >= 200 && response.status < 300
+          ? response.data?.meta
+          : null;
+
+        if (meta) {
+          succeeded++;
+          if (meta.poster && meta.poster !== item.poster) posterChanged++;
+          aioMetaApiPreviewCache.set(cacheKey, { meta, timestamp: Date.now() });
+          results[index] = { ...item, ...meta, id: itemId, type: item.type };
+        } else {
+          results[index] = item;
+        }
+      } catch (error) {
+        console.warn('[AIOMETA API] Preview enrichment failed', {
+          id: itemId,
+          type: itemType,
+          error: error.message
+        });
+        results[index] = item;
+      }
+    }
+  }
+
+  await Promise.all(
+    Array.from({ length: Math.min(AIOMETA_API_CONCURRENCY, items.length) }, () => worker())
+  );
+
+  console.log('[AIOMETA API] Meta fetch summary', {
+    configured: true,
+    requested: items.length,
+    attempted,
+    succeeded,
+    posterChanged,
+    statusCounts
+  });
+
+  return results;
+}`
+);
+
+replaceOnce(
+  '/usr/src/app/src/routes/api.js',
+  `      // Enrich items with metadata based on user's metadata source preference
+      let enrichedResult = itemsResult;
+      if (itemsResult.allItems && itemsResult.allItems.length > 0) {
+        const metadataSource = req.userConfig.metadataSource || 'cinemeta';
+        const hasTmdbOAuth = !!(req.userConfig.tmdbSessionId && req.userConfig.tmdbAccountId);
+        const tmdbLanguage = req.userConfig.tmdbLanguage || 'en-US';
+        const tmdbBearerToken = req.userConfig.tmdbBearerToken;
+        
+        const { enrichItemsWithMetadata } = require('../utils/metadataFetcher');
+        const enrichedItems = await enrichItemsWithMetadata(
+          itemsResult.allItems, 
+          metadataSource, 
+          hasTmdbOAuth, 
+          tmdbLanguage, 
+          tmdbBearerToken
+        );
+        
+        // Update the items result with enriched items
+        enrichedResult = {
+          ...itemsResult,
+          allItems: enrichedItems
+        };
+      }`,
+  `      // Enrich items with metadata based on user's metadata source preference.
+      // Trakt recommendation catalogs use the user's AIOMetadata instance instead.
+      let enrichedResult = itemsResult;
+      const useAioMetaForRecommendations =
+        String(catalogId || '').startsWith('trakt_recommendations_');
+
+      if (String(catalogId || '').includes('recommendations')) {
+        console.log('[AIOMETA API] Routing decision', {
+          id: catalogId,
+          configured: !!AIOMETA_USER_UUID,
+          useAioMetaForRecommendations
+        });
+      }
+
+      if (itemsResult.allItems && itemsResult.allItems.length > 0) {
+        const metadataSource = req.userConfig.metadataSource || 'cinemeta';
+        const hasTmdbOAuth = !!(req.userConfig.tmdbSessionId && req.userConfig.tmdbAccountId);
+        const tmdbLanguage = req.userConfig.tmdbLanguage || 'en-US';
+        const tmdbBearerToken = req.userConfig.tmdbBearerToken;
+        
+        let enrichedItems;
+        if (useAioMetaForRecommendations) {
+          enrichedItems = await enrichApiRecommendationItemsWithAioMeta(itemsResult.allItems);
+        } else {
+          const { enrichItemsWithMetadata } = require('../utils/metadataFetcher');
+          enrichedItems = await enrichItemsWithMetadata(
+            itemsResult.allItems, 
+            metadataSource, 
+            hasTmdbOAuth, 
+            tmdbLanguage, 
+            tmdbBearerToken
+          );
+        }
+        
+        enrichedResult = {
+          ...itemsResult,
+          allItems: enrichedItems
+        };
+      }`
+);
+
+replaceOnce(
+  '/usr/src/app/src/routes/api.js',
+  `      let metas = await convertToStremioFormat(enrichedResult, req.userConfig.rpdbApiKey, metadataConfig);  `,
+  `      const converterRpdbKey = useAioMetaForRecommendations ? null : req.userConfig.rpdbApiKey;
+      let metas = await convertToStremioFormat(enrichedResult, converterRpdbKey, metadataConfig);  `
+);
+
+console.log('Applied AIOMetadata bridge to live API catalog route successfully.');
