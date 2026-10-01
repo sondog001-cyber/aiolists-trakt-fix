@@ -1166,3 +1166,119 @@ replaceOnce(
 );
 
 console.log('Applied expanded Trakt recommendation-signal diagnostics successfully.');
+
+
+// 18) Compare the public API view of the website username directly against "me".
+replaceOnce(
+  '/usr/src/app/src/integrations/trakt.js',
+  `                    watchlistShowsStatus: watchlistShowsDiag.status,
+                    watchlistShowsCount: totalFrom(watchlistShowsDiag)
+                  });`,
+  `                    watchlistShowsStatus: watchlistShowsDiag.status,
+                    watchlistShowsCount: totalFrom(watchlistShowsDiag)
+                  });
+
+                  try {
+                    const explicitUser = 'jarvis-15647299';
+                    const encodedUser = encodeURIComponent(explicitUser);
+
+                    const [
+                      explicitProfileDiag,
+                      explicitMovieHistoryDiag,
+                      explicitShowHistoryDiag,
+                      explicitWatchedMoviesDiag,
+                      explicitWatchedShowsDiag,
+                      explicitRatedMoviesDiag,
+                      explicitRatedShowsDiag,
+                      explicitFavoriteMoviesDiag,
+                      explicitFavoriteShowsDiag,
+                      explicitWatchlistMoviesDiag,
+                      explicitWatchlistShowsDiag,
+                      explicitSmartListsDiag
+                    ] = await Promise.all([
+                      axios.get(
+                        \`\${TRAKT_API_URL}/users/\${encodedUser}\`,
+                        { headers, params: { extended: 'full' }, timeout: 10000, validateStatus: () => true }
+                      ),
+                      axios.get(
+                        \`\${TRAKT_API_URL}/users/\${encodedUser}/history/movies\`,
+                        { headers, params: { page: 1, limit: 1 }, timeout: 10000, validateStatus: () => true }
+                      ),
+                      axios.get(
+                        \`\${TRAKT_API_URL}/users/\${encodedUser}/history/shows\`,
+                        { headers, params: { page: 1, limit: 1 }, timeout: 10000, validateStatus: () => true }
+                      ),
+                      axios.get(
+                        \`\${TRAKT_API_URL}/users/\${encodedUser}/watched/movies\`,
+                        { headers, timeout: 10000, validateStatus: () => true }
+                      ),
+                      axios.get(
+                        \`\${TRAKT_API_URL}/users/\${encodedUser}/watched/shows\`,
+                        { headers, params: { extended: 'noseasons' }, timeout: 10000, validateStatus: () => true }
+                      ),
+                      axios.get(
+                        \`\${TRAKT_API_URL}/users/\${encodedUser}/ratings/movies\`,
+                        { headers, params: { page: 1, limit: 1 }, timeout: 10000, validateStatus: () => true }
+                      ),
+                      axios.get(
+                        \`\${TRAKT_API_URL}/users/\${encodedUser}/ratings/shows\`,
+                        { headers, params: { page: 1, limit: 1 }, timeout: 10000, validateStatus: () => true }
+                      ),
+                      axios.get(
+                        \`\${TRAKT_API_URL}/users/\${encodedUser}/favorites/movies/rank\`,
+                        { headers, params: { page: 1, limit: 1 }, timeout: 10000, validateStatus: () => true }
+                      ),
+                      axios.get(
+                        \`\${TRAKT_API_URL}/users/\${encodedUser}/favorites/shows/rank\`,
+                        { headers, params: { page: 1, limit: 1 }, timeout: 10000, validateStatus: () => true }
+                      ),
+                      axios.get(
+                        \`\${TRAKT_API_URL}/users/\${encodedUser}/watchlist/movies/rank\`,
+                        { headers, params: { page: 1, limit: 1 }, timeout: 10000, validateStatus: () => true }
+                      ),
+                      axios.get(
+                        \`\${TRAKT_API_URL}/users/\${encodedUser}/watchlist/shows/rank\`,
+                        { headers, params: { page: 1, limit: 1 }, timeout: 10000, validateStatus: () => true }
+                      ),
+                      axios.get(
+                        \`\${TRAKT_API_URL}/users/\${encodedUser}/smart-lists\`,
+                        { headers, timeout: 10000, validateStatus: () => true }
+                      )
+                    ]);
+
+                    console.log('[TRAKT DIAG] explicit username', {
+                      requestedUser: explicitUser,
+                      profileStatus: explicitProfileDiag.status,
+                      profileUsername: explicitProfileDiag.data?.username || null,
+                      profileName: explicitProfileDiag.data?.name || null,
+                      profileSlug: explicitProfileDiag.data?.ids?.slug || null,
+                      profileUuid: explicitProfileDiag.data?.ids?.uuid || null,
+                      movieHistoryStatus: explicitMovieHistoryDiag.status,
+                      movieHistoryCount: totalFrom(explicitMovieHistoryDiag),
+                      showHistoryStatus: explicitShowHistoryDiag.status,
+                      showHistoryCount: totalFrom(explicitShowHistoryDiag),
+                      watchedMoviesStatus: explicitWatchedMoviesDiag.status,
+                      watchedMoviesCount: Array.isArray(explicitWatchedMoviesDiag.data) ? explicitWatchedMoviesDiag.data.length : 0,
+                      watchedShowsStatus: explicitWatchedShowsDiag.status,
+                      watchedShowsCount: Array.isArray(explicitWatchedShowsDiag.data) ? explicitWatchedShowsDiag.data.length : 0,
+                      ratedMoviesStatus: explicitRatedMoviesDiag.status,
+                      ratedMoviesCount: totalFrom(explicitRatedMoviesDiag),
+                      ratedShowsStatus: explicitRatedShowsDiag.status,
+                      ratedShowsCount: totalFrom(explicitRatedShowsDiag),
+                      favoriteMoviesStatus: explicitFavoriteMoviesDiag.status,
+                      favoriteMoviesCount: totalFrom(explicitFavoriteMoviesDiag),
+                      favoriteShowsStatus: explicitFavoriteShowsDiag.status,
+                      favoriteShowsCount: totalFrom(explicitFavoriteShowsDiag),
+                      watchlistMoviesStatus: explicitWatchlistMoviesDiag.status,
+                      watchlistMoviesCount: totalFrom(explicitWatchlistMoviesDiag),
+                      watchlistShowsStatus: explicitWatchlistShowsDiag.status,
+                      watchlistShowsCount: totalFrom(explicitWatchlistShowsDiag),
+                      smartListsStatus: explicitSmartListsDiag.status,
+                      smartListsCount: Array.isArray(explicitSmartListsDiag.data) ? explicitSmartListsDiag.data.length : 0
+                    });
+                  } catch (explicitDiagError) {
+                    console.error('[TRAKT DIAG] explicit username failed:', explicitDiagError.message);
+                  }`
+);
+
+console.log('Applied explicit Trakt website-username diagnostics successfully.');
