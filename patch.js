@@ -652,6 +652,27 @@ replaceOnce(
 
 console.log('Applied current Trakt recommendation endpoint path fix successfully.');
 
+// 13) Use the same private production recommendation service as the current Trakt web client.
+// Trakt's current web app targets Environment.production_private = https://apiz.trakt.tv
+// and requests /movies/recommendations or /shows/recommendations with these defaults.
+replaceOnce(
+  '/usr/src/app/src/integrations/trakt.js',
+  `        requestUrl = \`\${TRAKT_API_URL}/\${effectiveItemTypeForEndpoint === 'series' ? 'shows' : 'movies'}/recommendations\`;
+        // Current Trakt recommendations endpoints support limit + filters, but not page.
+        params = { limit, extended: 'full' };`,
+  `        requestUrl = \`https://apiz.trakt.tv/\${effectiveItemTypeForEndpoint === 'series' ? 'shows' : 'movies'}/recommendations\`;
+        // Match the current Trakt web client's recommendation request defaults.
+        params = {
+          limit,
+          extended: 'full,images,colors',
+          ignore_collected: true,
+          ignore_watched: true
+        };`
+);
+
+console.log('Applied Trakt web-client private recommendation service fix successfully.');
+
+
 
 
 
