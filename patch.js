@@ -1333,3 +1333,22 @@ replaceOnce(
 );
 
 console.log('Applied catalog-only manifest for external metadata addon handoff successfully.');
+
+
+// 21) A catalog-only Stremio addon must not register a meta handler.
+// The SDK validates that every registered handler is declared in manifest.resources.
+{
+  const addonBuilderFile = '/usr/src/app/src/addon/addonBuilder.js';
+  let source = fs.readFileSync(addonBuilderFile, 'utf8');
+  const metaHandlerStart = source.indexOf("  builder.defineMetaHandler(async ({ type, id }) => {");
+  const afterMetaHandler = source.indexOf("\n  const endTime = Date.now();", metaHandlerStart);
+
+  if (metaHandlerStart === -1 || afterMetaHandler === -1) {
+    throw new Error('Could not locate AIOLists meta handler for catalog-only patch');
+  }
+
+  source = source.slice(0, metaHandlerStart) + source.slice(afterMetaHandler);
+  fs.writeFileSync(addonBuilderFile, source);
+}
+
+console.log('Removed AIOLists meta handler for AIOMetadata handoff successfully.');
