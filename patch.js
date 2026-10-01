@@ -397,3 +397,49 @@ replaceOnce(
 
 console.log('Applied AIOLists manifest cache hydration fix successfully.');
 
+// 8) Trust the known media type for built-in Trakt virtual catalogs.
+// Upstream re-probes these catalogs to infer hasMovies/hasShows, and if that
+// probe returns no metadata the manifest silently drops Recommended Movies/Shows.
+replaceOnce(
+  '/usr/src/app/src/addon/addonBuilder.js',
+  `} else if (listSourceInfo.source === 'trakt') { // This now only handles private trakt
+      let metadata = userConfig.listsMetadata[currentListId] || {};
+      sourceHasMovies = metadata.hasMovies === true;
+      sourceHasShows = metadata.hasShows === true;
+
+        if (listSourceInfo.source === 'trakt' && (typeof metadata.hasMovies !== 'boolean' || typeof metadata.hasShows !== 'boolean' || metadata.errorFetching) && traktAccessToken) {`,
+  `} else if (listSourceInfo.source === 'trakt') { // This now only handles private trakt
+      let metadata = userConfig.listsMetadata[currentListId] || {};
+
+      // Built-in Trakt virtual catalogs already declare their media type.
+      // Do not make manifest visibility depend on a live metadata probe.
+      if (currentListId === 'trakt_recommendations_movies' ||
+          currentListId === 'trakt_trending_movies' ||
+          currentListId === 'trakt_popular_movies') {
+        sourceHasMovies = true;
+        sourceHasShows = false;
+      } else if (currentListId === 'trakt_recommendations_shows' ||
+                 currentListId === 'trakt_trending_shows' ||
+                 currentListId === 'trakt_popular_shows') {
+        sourceHasMovies = false;
+        sourceHasShows = true;
+      } else if (currentListId === 'trakt_watchlist') {
+        sourceHasMovies = true;
+        sourceHasShows = true;
+      } else {
+        sourceHasMovies = metadata.hasMovies === true;
+        sourceHasShows = metadata.hasShows === true;
+      }
+
+        if (listSourceInfo.source === 'trakt' &&
+            !currentListId.startsWith('trakt_recommendations_') &&
+            !currentListId.startsWith('trakt_trending_') &&
+            !currentListId.startsWith('trakt_popular_') &&
+            currentListId !== 'trakt_watchlist' &&
+            (typeof metadata.hasMovies !== 'boolean' || typeof metadata.hasShows !== 'boolean' || metadata.errorFetching) &&
+            traktAccessToken) {`
+);
+
+console.log('Applied AIOLists Trakt virtual catalog manifest fix successfully.');
+
+
