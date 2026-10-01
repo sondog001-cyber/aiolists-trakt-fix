@@ -772,3 +772,205 @@ console.log('Applied supported Trakt Smart List recommendations fallback success
 
 
 
+
+
+// 15) Add a one-click Smart List initializer because Trakt's current web UI
+// only exposes Trending / Anticipated / Popular even though the API contract
+// accepts source="recommendations" for Smart Lists.
+replaceOnce(
+  '/usr/src/app/src/routes/api.js',
+  "const path = require('path');",
+  "const path = require('path');\nconst axios = require('axios');"
+);
+
+replaceOnce(
+  '/usr/src/app/src/routes/api.js',
+  "const { defaultConfig, staticGenres, TMDB_BEARER_TOKEN, TMDB_REDIRECT_URI, TRAKT_REDIRECT_URI } = require('../config');",
+  "const { defaultConfig, staticGenres, TMDB_BEARER_TOKEN, TMDB_REDIRECT_URI, TRAKT_REDIRECT_URI, TRAKT_CLIENT_ID } = require('../config');"
+);
+
+replaceOnce(
+  '/usr/src/app/src/routes/api.js',
+  "  router.post('/:configHash/trakt/device/start', async (req, res) => {",
+  `  router.post('/:configHash/trakt/recommendation-smart-lists/init', async (req, res) => {
+    try {
+      const ready = await initTraktApi(req.userConfig);
+      if (!ready || !req.userConfig.traktAccessToken) {
+        return res.status(401).json({ success: false, error: 'Trakt is not connected.' });
+      }
+
+      const headers = {
+        'Content-Type': 'application/json',
+        'trakt-api-version': '2',
+        'trakt-api-key': TRAKT_CLIENT_ID,
+        'Authorization': \`Bearer \${req.userConfig.traktAccessToken}\`
+      };
+
+      const existingResponse = await axios.get(
+        'https://api.trakt.tv/users/me/smart-lists',
+        { headers, timeout: 10000, validateStatus: () => true }
+      );
+
+      if (existingResponse.status < 200 || existingResponse.status >= 300) {
+        return res.status(existingResponse.status || 500).json({
+          success: false,
+          error: 'Unable to read Trakt Smart Lists.',
+          details: existingResponse.data
+        });
+      }
+
+      const existing = Array.isArray(existingResponse.data) ? existingResponse.data : [];
+      const wanted = [
+        { name: 'AIOLists Recommended Movies', source: 'recommendations', media_type: 'movies', privacy: 'private' },
+        { name: 'AIOLists Recommended Shows', source: 'recommendations', media_type: 'shows', privacy: 'private' }
+      ];
+
+      const results = [];
+
+      for (const definition of wanted) {
+        const found = existing.find((list) =>
+          list &&
+          list.source === 'recommendations' &&
+          list.media_type === definition.media_type
+        );
+
+        if (found) {
+          results.push({
+            media_type: definition.media_type,
+            status: 'exists',
+            name: found.name,
+            slug: found.ids?.slug || null
+          });
+          continue;
+        }
+
+        const createResponse = await axios.post(
+          'https://api.trakt.tv/users/me/smart-lists',
+          definition,
+          { headers, timeout: 10000, validateStatus: () => true }
+        );
+
+        if (createResponse.status === 201) {
+          results.push({
+            media_type: definition.media_type,
+            status: 'created',
+            name: createResponse.data?.name || definition.name,
+            slug: createResponse.data?.ids?.slug || null
+          });
+        } else {
+          results.push({
+            media_type: definition.media_type,
+            status: 'failed',
+            httpStatus: createResponse.status,
+            details: createResponse.data
+          });
+        }
+      }
+
+      const failed = results.filter(r => r.status === 'failed');
+      if (failed.length) {
+        const firstStatus = failed[0].httpStatus || 500;
+        return res.status(firstStatus).json({
+          success: false,
+          error: firstStatus === 403
+            ? 'Trakt rejected Smart List creation. This feature may require Trakt VIP.'
+            : 'One or more recommendation Smart Lists could not be created.',
+          results
+        });
+      }
+
+      manifestCache.clear();
+      res.json({ success: true, results });
+    } catch (error) {
+      console.error('[TRAKT RECS] Smart List initialization failed:', error.response?.data || error.message);
+      res.status(500).json({
+        success: false,
+        error: 'Failed to initialize recommendation Smart Lists.',
+        details: error.response?.data || error.message
+      });
+    }
+  });
+
+  router.post('/:configHash/trakt/device/start', async (req, res) => {`
+);
+
+replaceOnce(
+  '/usr/src/app/public/script.js',
+  "        elements.traktPersistenceContainer.style.setProperty('display', 'flex', 'important');",
+  `        elements.traktPersistenceContainer.style.setProperty('display', 'flex', 'important');
+
+        let initRecommendationListsBtn = document.getElementById('initTraktRecommendationListsBtn');
+        if (!initRecommendationListsBtn) {
+          initRecommendationListsBtn = document.createElement('button');
+          initRecommendationListsBtn.id = 'initTraktRecommendationListsBtn';
+          initRecommendationListsBtn.type = 'button';
+          initRecommendationListsBtn.className = 'connection-btn trakt-btn action-btn';
+          initRecommendationListsBtn.textContent = 'Create Recommendation Smart Lists';
+          initRecommendationListsBtn.style.marginTop = '8px';
+          initRecommendationListsBtn.addEventListener('click', initializeTraktRecommendationLists);
+          elements.traktPersistenceContainer.insertAdjacentElement('afterend', initRecommendationListsBtn);
+        }
+        initRecommendationListsBtn.style.setProperty('display', 'inline-flex', 'important');`
+);
+
+replaceOnce(
+  '/usr/src/app/public/script.js',
+  "        elements.traktPersistenceContainer.style.setProperty('display', 'none', 'important');",
+  `        elements.traktPersistenceContainer.style.setProperty('display', 'none', 'important');
+        const initRecommendationListsBtn = document.getElementById('initTraktRecommendationListsBtn');
+        if (initRecommendationListsBtn) {
+          initRecommendationListsBtn.style.setProperty('display', 'none', 'important');
+        }`
+);
+
+replaceOnce(
+  '/usr/src/app/public/script.js',
+  "  function handleTraktPinCancel() {",
+  `  async function initializeTraktRecommendationLists() {
+    const button = document.getElementById('initTraktRecommendationListsBtn');
+    if (!state.configHash) {
+      showNotification('connections', 'Configuration is still loading.', 'error');
+      return;
+    }
+
+    const originalText = button?.textContent;
+    if (button) {
+      button.disabled = true;
+      button.textContent = 'Creating Recommendation Lists...';
+    }
+
+    try {
+      const response = await fetch(\`/\${state.configHash}/trakt/recommendation-smart-lists/init\`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' }
+      });
+      const data = await response.json();
+
+      if (!response.ok || !data.success) {
+        const detail = Array.isArray(data.results)
+          ? data.results.map(r => \`\${r.media_type}: \${r.status}\${r.httpStatus ? ' (' + r.httpStatus + ')' : ''}\`).join(', ')
+          : '';
+        throw new Error(\`\${data.error || 'Failed to create Trakt Smart Lists'}\${detail ? ' — ' + detail : ''}\`);
+      }
+
+      showNotification(
+        'connections',
+        'Recommendation Smart Lists are ready. Open Recommended Movies/Shows in Stremio again.',
+        'success',
+        true
+      );
+    } catch (error) {
+      console.error('Recommendation Smart List initialization error:', error);
+      showNotification('connections', error.message, 'error', true);
+    } finally {
+      if (button) {
+        button.disabled = false;
+        button.textContent = originalText || 'Create Recommendation Smart Lists';
+      }
+    }
+  }
+
+  function handleTraktPinCancel() {`
+);
+
+console.log('Applied Trakt Recommendation Smart List initializer button successfully.');
