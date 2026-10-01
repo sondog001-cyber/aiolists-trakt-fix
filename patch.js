@@ -363,3 +363,37 @@ replaceOnce(
 );
 
 console.log('Applied AIOLists Trakt Device Code Flow patch successfully.');
+
+// 7) Fix manifest generation for Upstash-backed Trakt auth.
+// Upstream checks the manifest cache before initTraktApi(), so a pre-auth/search-only
+// manifest can be reused even after Trakt is connected and its tokens live in Upstash.
+replaceOnce(
+  '/usr/src/app/src/addon/addonBuilder.js',
+  `async function createAddon(userConfig) {
+  const startTime = Date.now();
+  
+  // Check manifest cache first (if enabled)`,
+  `async function createAddon(userConfig) {
+  const startTime = Date.now();
+
+  // Hydrate Trakt tokens from Upstash BEFORE computing/reading the manifest cache.
+  // This makes Trakt catalogs participate in the cache key and prevents stale
+  // search-only manifests after OAuth succeeds.
+  await initTraktApi(userConfig);
+  
+  // Check manifest cache first (if enabled)`
+);
+
+replaceOnce(
+  '/usr/src/app/src/addon/addonBuilder.js',
+  `  }
+  
+  await initTraktApi(userConfig);
+  const manifest = {`,
+  `  }
+  
+  const manifest = {`
+);
+
+console.log('Applied AIOLists manifest cache hydration fix successfully.');
+
