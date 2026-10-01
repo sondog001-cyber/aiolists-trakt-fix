@@ -636,6 +636,23 @@ replaceOnce(
 
 console.log('Applied Trakt recommendation pipeline diagnostics and TMDB ID fallback successfully.');
 
+// 12) Follow the current Trakt web app recommendation endpoints.
+// The official Trakt web client now requests /movies/recommendations and
+// /shows/recommendations. The legacy /recommendations/movies and
+// /recommendations/shows routes can return HTTP 200 with an empty array.
+replaceOnce(
+  '/usr/src/app/src/integrations/trakt.js',
+  `        requestUrl = \`\${TRAKT_API_URL}/recommendations/\${effectiveItemTypeForEndpoint === 'series' ? 'shows' : 'movies'}/\`;
+        // Current Trakt recommendations endpoints support limit + filters, but not page.
+        params = { limit, extended: 'full' };`,
+  `        requestUrl = \`\${TRAKT_API_URL}/\${effectiveItemTypeForEndpoint === 'series' ? 'shows' : 'movies'}/recommendations\`;
+        // Current Trakt recommendations endpoints support limit + filters, but not page.
+        params = { limit, extended: 'full' };`
+);
+
+console.log('Applied current Trakt recommendation endpoint path fix successfully.');
+
+
 
 
 
