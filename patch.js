@@ -1370,12 +1370,21 @@ const AIOMETA_CONCURRENCY = 6;
 const aioMetaPreviewCache = new Map();
 
 async function enrichRecommendationItemsWithAioMeta(items) {
-  if (!Array.isArray(items) || items.length === 0 || !AIOMETA_USER_UUID) {
+  if (!Array.isArray(items) || items.length === 0) {
     return items || [];
+  }
+
+  if (!AIOMETA_USER_UUID) {
+    console.warn('[AIOMETA] AIOMETA_USER_UUID is not available at runtime');
+    return items;
   }
 
   const results = new Array(items.length);
   let cursor = 0;
+  let attempted = 0;
+  let succeeded = 0;
+  let posterChanged = 0;
+  const statusCounts = {};
 
   async function worker() {
     while (true) {
@@ -1400,16 +1409,20 @@ async function enrichRecommendationItemsWithAioMeta(items) {
 
       try {
         const url = \`\${AIOMETA_BASE_URL}/stremio/\${encodeURIComponent(AIOMETA_USER_UUID)}/meta/\${itemType}/\${encodeURIComponent(itemId)}.json\`;
+        attempted++;
         const response = await axios.get(url, {
           timeout: 10000,
           validateStatus: () => true
         });
+        statusCounts[response.status] = (statusCounts[response.status] || 0) + 1;
 
         const meta = response.status >= 200 && response.status < 300
           ? response.data?.meta
           : null;
 
         if (meta) {
+          succeeded++;
+          if (meta.poster && meta.poster !== item.poster) posterChanged++;
           aioMetaPreviewCache.set(cacheKey, { meta, timestamp: Date.now() });
           results[index] = { ...item, ...meta, id: itemId, type: item.type };
         } else {
@@ -1430,6 +1443,15 @@ async function enrichRecommendationItemsWithAioMeta(items) {
     Array.from({ length: Math.min(AIOMETA_CONCURRENCY, items.length) }, () => worker())
   );
 
+  console.log('[AIOMETA] Meta fetch summary', {
+    configured: true,
+    requested: items.length,
+    attempted,
+    succeeded,
+    posterChanged,
+    statusCounts
+  });
+
   return results;
 }`
 );
@@ -1447,8 +1469,15 @@ replaceOnce(
     const enrichEndTime = Date.now();`,
   `    const { enrichItemsWithMetadata } = require('../utils/metadataFetcher');
     const useAioMetaForRecommendations =
-      AIOMETA_USER_UUID &&
-      (id === 'trakt_recommendations_movies' || id === 'trakt_recommendations_shows');
+      String(id || '').startsWith('trakt_recommendations_');
+
+    if (String(id || '').includes('recommendations')) {
+      console.log('[AIOMETA] Routing decision', {
+        id,
+        configured: !!AIOMETA_USER_UUID,
+        useAioMetaForRecommendations
+      });
+    }
 
     let enrichedItems;
     if (useAioMetaForRecommendations) {
