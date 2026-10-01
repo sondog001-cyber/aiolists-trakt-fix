@@ -403,7 +403,7 @@ console.log('Applied AIOLists manifest cache hydration fix successfully.');
 replaceOnce(
   '/usr/src/app/src/addon/addonBuilder.js',
   `} else if (listSourceInfo.source === 'trakt') { // This now only handles private trakt
-      let metadata = userConfig.listsMetadata[currentListId] || {};
+      let metadata = userConfig.listsMetadata[currentListId] || userConfig.listsMetadata[listSourceInfo.originalId] || {};
       sourceHasMovies = metadata.hasMovies === true;
       sourceHasShows = metadata.hasShows === true;
 
