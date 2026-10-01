@@ -1352,3 +1352,133 @@ console.log('Applied catalog-only manifest for external metadata addon handoff s
 }
 
 console.log('Removed AIOLists meta handler for AIOMetadata handoff successfully.');
+
+
+// 22) Use the user's AIOMetadata instance to decorate Trakt recommendation
+// catalog cards (poster art, ratings overlays, backgrounds, etc.).
+// Configure with AIOMETA_USER_UUID on Render. The host defaults to the
+// user's existing aiometadata.fortheweak.cloud deployment.
+replaceOnce(
+  '/usr/src/app/src/addon/addonBuilder.js',
+  "const axios = require('axios');",
+  `const axios = require('axios');
+
+const AIOMETA_BASE_URL = (process.env.AIOMETA_BASE_URL || 'https://aiometadata.fortheweak.cloud').replace(/\\/+$/, '');
+const AIOMETA_USER_UUID = (process.env.AIOMETA_USER_UUID || '').trim();
+const AIOMETA_CACHE_TTL_MS = 5 * 60 * 1000;
+const AIOMETA_CONCURRENCY = 6;
+const aioMetaPreviewCache = new Map();
+
+async function enrichRecommendationItemsWithAioMeta(items) {
+  if (!Array.isArray(items) || items.length === 0 || !AIOMETA_USER_UUID) {
+    return items || [];
+  }
+
+  const results = new Array(items.length);
+  let cursor = 0;
+
+  async function worker() {
+    while (true) {
+      const index = cursor++;
+      if (index >= items.length) return;
+
+      const item = items[index];
+      const itemId = item?.imdb_id || item?.id;
+      const itemType = item?.type === 'series' ? 'series' : 'movie';
+
+      if (!itemId || (!String(itemId).startsWith('tt') && !String(itemId).startsWith('tmdb:'))) {
+        results[index] = item;
+        continue;
+      }
+
+      const cacheKey = \`\${itemType}:\${itemId}\`;
+      const cached = aioMetaPreviewCache.get(cacheKey);
+      if (cached && (Date.now() - cached.timestamp) < AIOMETA_CACHE_TTL_MS) {
+        results[index] = { ...item, ...cached.meta, id: itemId, type: item.type };
+        continue;
+      }
+
+      try {
+        const url = \`\${AIOMETA_BASE_URL}/stremio/\${encodeURIComponent(AIOMETA_USER_UUID)}/meta/\${itemType}/\${encodeURIComponent(itemId)}.json\`;
+        const response = await axios.get(url, {
+          timeout: 10000,
+          validateStatus: () => true
+        });
+
+        const meta = response.status >= 200 && response.status < 300
+          ? response.data?.meta
+          : null;
+
+        if (meta) {
+          aioMetaPreviewCache.set(cacheKey, { meta, timestamp: Date.now() });
+          results[index] = { ...item, ...meta, id: itemId, type: item.type };
+        } else {
+          results[index] = item;
+        }
+      } catch (error) {
+        console.warn('[AIOMETA] Preview enrichment failed', {
+          id: itemId,
+          type: itemType,
+          error: error.message
+        });
+        results[index] = item;
+      }
+    }
+  }
+
+  await Promise.all(
+    Array.from({ length: Math.min(AIOMETA_CONCURRENCY, items.length) }, () => worker())
+  );
+
+  return results;
+}`
+);
+
+replaceOnce(
+  '/usr/src/app/src/addon/addonBuilder.js',
+  `    const { enrichItemsWithMetadata } = require('../utils/metadataFetcher');
+    const enrichedItems = await enrichItemsWithMetadata(
+      itemsResult.allItems, 
+      metadataSource, 
+      hasTmdbOAuth, 
+      tmdbLanguage, 
+      tmdbBearerToken
+    );
+    const enrichEndTime = Date.now();`,
+  `    const { enrichItemsWithMetadata } = require('../utils/metadataFetcher');
+    const useAioMetaForRecommendations =
+      AIOMETA_USER_UUID &&
+      (id === 'trakt_recommendations_movies' || id === 'trakt_recommendations_shows');
+
+    let enrichedItems;
+    if (useAioMetaForRecommendations) {
+      enrichedItems = await enrichRecommendationItemsWithAioMeta(itemsResult.allItems);
+      console.log('[AIOMETA] Recommendation catalog enrichment', {
+        id,
+        requested: itemsResult.allItems.length,
+        enriched: enrichedItems.filter((item, index) =>
+          item && itemsResult.allItems[index] && item.poster !== itemsResult.allItems[index].poster
+        ).length
+      });
+    } else {
+      enrichedItems = await enrichItemsWithMetadata(
+        itemsResult.allItems,
+        metadataSource,
+        hasTmdbOAuth,
+        tmdbLanguage,
+        tmdbBearerToken
+      );
+    }
+    const enrichEndTime = Date.now();`
+);
+
+replaceOnce(
+  '/usr/src/app/src/addon/addonBuilder.js',
+  `    let metas = await convertToStremioFormat(enrichedResult, userConfig.rpdbApiKey, metadataConfig);
+    const convertEndTime = Date.now();`,
+  `    const converterRpdbKey = useAioMetaForRecommendations ? null : userConfig.rpdbApiKey;
+    let metas = await convertToStremioFormat(enrichedResult, converterRpdbKey, metadataConfig);
+    const convertEndTime = Date.now();`
+);
+
+console.log('Applied AIOMetadata recommendation-card enrichment successfully.');
