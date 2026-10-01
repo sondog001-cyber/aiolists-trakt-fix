@@ -1041,3 +1041,128 @@ replaceOnce(
 );
 
 console.log('Applied connected-account and watch-history diagnostics successfully.');
+
+
+// 17) Expand diagnostics to the recommendation-driving signals that Trakt's
+// current web client exposes: favorites/activity/subgenres, not only history.
+replaceOnce(
+  '/usr/src/app/src/integrations/trakt.js',
+  `                  const [settingsDiag, movieHistoryDiag, showHistoryDiag] = await Promise.all([
+                    axios.get(
+                      \`\${TRAKT_API_URL}/users/settings\`,
+                      { headers, timeout: 10000, validateStatus: () => true }
+                    ),
+                    axios.get(
+                      \`\${TRAKT_API_URL}/users/me/history/movies\`,
+                      { headers, params: { page: 1, limit: 1 }, timeout: 10000, validateStatus: () => true }
+                    ),
+                    axios.get(
+                      \`\${TRAKT_API_URL}/users/me/history/shows\`,
+                      { headers, params: { page: 1, limit: 1 }, timeout: 10000, validateStatus: () => true }
+                    )
+                  ]);\n\n                  console.log('[TRAKT DIAG] connected account', {
+                    settingsStatus: settingsDiag.status,
+                    username: settingsDiag.data?.user?.username || null,
+                    name: settingsDiag.data?.user?.name || null,
+                    uuid: settingsDiag.data?.user?.ids?.uuid || null,
+                    movieHistoryStatus: movieHistoryDiag.status,
+                    movieHistoryCount: Number(movieHistoryDiag.headers?.['x-pagination-item-count'] ?? (Array.isArray(movieHistoryDiag.data) ? movieHistoryDiag.data.length : 0)),
+                    showHistoryStatus: showHistoryDiag.status,
+                    showHistoryCount: Number(showHistoryDiag.headers?.['x-pagination-item-count'] ?? (Array.isArray(showHistoryDiag.data) ? showHistoryDiag.data.length : 0))
+                  });`,
+  `                  const [
+                    settingsDiag,
+                    movieHistoryDiag,
+                    showHistoryDiag,
+                    watchedMoviesDiag,
+                    watchedShowsDiag,
+                    ratedMoviesDiag,
+                    ratedShowsDiag,
+                    favoriteMoviesDiag,
+                    favoriteShowsDiag,
+                    watchlistMoviesDiag,
+                    watchlistShowsDiag
+                  ] = await Promise.all([
+                    axios.get(
+                      \`\${TRAKT_API_URL}/users/settings\`,
+                      { headers, params: { extended: 'browsing' }, timeout: 10000, validateStatus: () => true }
+                    ),
+                    axios.get(
+                      \`\${TRAKT_API_URL}/users/me/history/movies\`,
+                      { headers, params: { page: 1, limit: 1 }, timeout: 10000, validateStatus: () => true }
+                    ),
+                    axios.get(
+                      \`\${TRAKT_API_URL}/users/me/history/shows\`,
+                      { headers, params: { page: 1, limit: 1 }, timeout: 10000, validateStatus: () => true }
+                    ),
+                    axios.get(
+                      \`\${TRAKT_API_URL}/users/me/watched/movies\`,
+                      { headers, timeout: 10000, validateStatus: () => true }
+                    ),
+                    axios.get(
+                      \`\${TRAKT_API_URL}/users/me/watched/shows\`,
+                      { headers, params: { extended: 'noseasons' }, timeout: 10000, validateStatus: () => true }
+                    ),
+                    axios.get(
+                      \`\${TRAKT_API_URL}/users/me/ratings/movies\`,
+                      { headers, params: { page: 1, limit: 1 }, timeout: 10000, validateStatus: () => true }
+                    ),
+                    axios.get(
+                      \`\${TRAKT_API_URL}/users/me/ratings/shows\`,
+                      { headers, params: { page: 1, limit: 1 }, timeout: 10000, validateStatus: () => true }
+                    ),
+                    axios.get(
+                      \`\${TRAKT_API_URL}/users/me/favorites/movies/rank\`,
+                      { headers, params: { page: 1, limit: 1 }, timeout: 10000, validateStatus: () => true }
+                    ),
+                    axios.get(
+                      \`\${TRAKT_API_URL}/users/me/favorites/shows/rank\`,
+                      { headers, params: { page: 1, limit: 1 }, timeout: 10000, validateStatus: () => true }
+                    ),
+                    axios.get(
+                      \`\${TRAKT_API_URL}/users/me/watchlist/movies/rank\`,
+                      { headers, params: { page: 1, limit: 1 }, timeout: 10000, validateStatus: () => true }
+                    ),
+                    axios.get(
+                      \`\${TRAKT_API_URL}/users/me/watchlist/shows/rank\`,
+                      { headers, params: { page: 1, limit: 1 }, timeout: 10000, validateStatus: () => true }
+                    )
+                  ]);
+
+                  const totalFrom = (response) => Number(
+                    response.headers?.['x-pagination-item-count'] ??
+                    (Array.isArray(response.data) ? response.data.length : 0)
+                  );
+
+                  console.log('[TRAKT DIAG] connected account', {
+                    settingsStatus: settingsDiag.status,
+                    displayName: settingsDiag.data?.user?.username || null,
+                    profileName: settingsDiag.data?.user?.name || null,
+                    usernameSlug: settingsDiag.data?.user?.ids?.slug || null,
+                    uuid: settingsDiag.data?.user?.ids?.uuid || null,
+                    vip: settingsDiag.data?.user?.vip ?? null,
+                    favoriteGenres: settingsDiag.data?.browsing?.genres?.favorites || [],
+                    movieHistoryStatus: movieHistoryDiag.status,
+                    movieHistoryCount: totalFrom(movieHistoryDiag),
+                    showHistoryStatus: showHistoryDiag.status,
+                    showHistoryCount: totalFrom(showHistoryDiag),
+                    watchedMoviesStatus: watchedMoviesDiag.status,
+                    watchedMoviesCount: Array.isArray(watchedMoviesDiag.data) ? watchedMoviesDiag.data.length : 0,
+                    watchedShowsStatus: watchedShowsDiag.status,
+                    watchedShowsCount: Array.isArray(watchedShowsDiag.data) ? watchedShowsDiag.data.length : 0,
+                    ratedMoviesStatus: ratedMoviesDiag.status,
+                    ratedMoviesCount: totalFrom(ratedMoviesDiag),
+                    ratedShowsStatus: ratedShowsDiag.status,
+                    ratedShowsCount: totalFrom(ratedShowsDiag),
+                    favoriteMoviesStatus: favoriteMoviesDiag.status,
+                    favoriteMoviesCount: totalFrom(favoriteMoviesDiag),
+                    favoriteShowsStatus: favoriteShowsDiag.status,
+                    favoriteShowsCount: totalFrom(favoriteShowsDiag),
+                    watchlistMoviesStatus: watchlistMoviesDiag.status,
+                    watchlistMoviesCount: totalFrom(watchlistMoviesDiag),
+                    watchlistShowsStatus: watchlistShowsDiag.status,
+                    watchlistShowsCount: totalFrom(watchlistShowsDiag)
+                  });`
+);
+
+console.log('Applied expanded Trakt recommendation-signal diagnostics successfully.');
