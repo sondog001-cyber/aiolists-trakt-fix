@@ -442,4 +442,76 @@ replaceOnce(
 
 console.log('Applied AIOLists Trakt virtual catalog manifest fix successfully.');
 
+// 9) Harden Trakt recommendation catalogs for current Trakt API + stale N/A type overrides.
+replaceOnce(
+  '/usr/src/app/src/integrations/trakt.js',
+  `    } else if (listId.startsWith('trakt_recommendations_')) {
+        effectiveItemTypeForEndpoint = listId.endsWith('_movies') ? 'movie' : (listId.endsWith('_shows') ? 'series' : null);
+        if (!effectiveItemTypeForEndpoint) { 
+            console.error(\`[TraktIntegration] Invalid recommendations list ID: \${listId}\`);
+            return null; 
+        }
+        requestUrl = \`\${TRAKT_API_URL}/recommendations/\${effectiveItemTypeForEndpoint === 'series' ? 'shows' : 'movies'}\`;
+        if (genre && !isMetadataCheck) params.genres = genre.toLowerCase().replace(/\\s+/g, '-');`,
+  `    } else if (listId.startsWith('trakt_recommendations_')) {
+        effectiveItemTypeForEndpoint = listId.endsWith('_movies') ? 'movie' : (listId.endsWith('_shows') ? 'series' : null);
+        if (!effectiveItemTypeForEndpoint) {
+            console.error(\`[TraktIntegration] Invalid recommendations list ID: \${listId}\`);
+            return null;
+        }
+        requestUrl = \`\${TRAKT_API_URL}/recommendations/\${effectiveItemTypeForEndpoint === 'series' ? 'shows' : 'movies'}/\`;
+        // Current Trakt recommendations endpoints support limit + filters, but not page.
+        params = { limit, extended: 'full' };
+        if (genre && !isMetadataCheck) params.genres = genre.toLowerCase().replace(/\\s+/g, '-');`
+);
+
+replaceOnce(
+  '/usr/src/app/src/integrations/trakt.js',
+  `           } else if (listId.startsWith('trakt_recommendations_') || listId.startsWith('trakt_popular_')) {
+              if (effectiveItemTypeForEndpoint === 'movie' && entry.ids && entry.title && typeof entry.year === 'number') {
+                  resolvedStremioType = 'movie';
+                  itemDataForDetails = entry;
+              } else if (effectiveItemTypeForEndpoint === 'series' && entry.ids && entry.title && typeof entry.year === 'number') {
+                  resolvedStremioType = 'series';
+                  itemDataForDetails = entry;
+              } else {
+                  return null;
+              }`,
+  `           } else if (listId.startsWith('trakt_recommendations_') || listId.startsWith('trakt_popular_')) {
+              // Trakt recommendation responses are direct media objects today, but
+              // accept nested movie/show forms too for compatibility.
+              const candidate = effectiveItemTypeForEndpoint === 'movie'
+                ? (entry.movie || entry)
+                : (entry.show || entry);
+              if (candidate && candidate.ids && candidate.title) {
+                  resolvedStremioType = effectiveItemTypeForEndpoint;
+                  itemDataForDetails = candidate;
+              } else {
+                  return null;
+              }`
+);
+
+// Force canonical Stremio types for the two recommendation catalogs even if an
+// earlier UI config stored a literal "N/A" custom media type.
+replaceOnce(
+  '/usr/src/app/src/addon/addonBuilder.js',
+  `    const sourceIsStructurallyMergeable = sourceHasMovies && sourceHasShows;
+    const customUserDefinedType = customMediaTypeNames?.[currentListId];`,
+  `    const sourceIsStructurallyMergeable = sourceHasMovies && sourceHasShows;
+    let customUserDefinedType = customMediaTypeNames?.[currentListId];
+
+    if (currentListId === 'trakt_recommendations_movies') {
+      customUserDefinedType = 'movie';
+      sourceHasMovies = true;
+      sourceHasShows = false;
+    } else if (currentListId === 'trakt_recommendations_shows') {
+      customUserDefinedType = 'series';
+      sourceHasMovies = false;
+      sourceHasShows = true;
+    }`
+);
+
+console.log('Applied current Trakt recommendations compatibility fix successfully.');
+
+
 
