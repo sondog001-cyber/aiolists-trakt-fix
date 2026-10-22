@@ -1354,7 +1354,7 @@ console.log('Applied catalog-only manifest for external metadata addon handoff s
 console.log('Removed AIOLists meta handler for AIOMetadata handoff successfully.');
 
 
-// 22) Use the user's AIOMetadata instance to decorate Trakt recommendation
+// 22) Use the user's AIOMetadata instance to decorate Trakt recommendation and watchlist
 // catalog cards (poster art, ratings overlays, backgrounds, etc.).
 // Configure with AIOMETA_USER_UUID on Render. The host defaults to the
 // user's existing aiometadata.fortheweak.cloud deployment.
@@ -1369,7 +1369,7 @@ const AIOMETA_CACHE_TTL_MS = 5 * 60 * 1000;
 const AIOMETA_CONCURRENCY = 6;
 const aioMetaPreviewCache = new Map();
 
-async function enrichRecommendationItemsWithAioMeta(items) {
+async function enrichCatalogItemsWithAioMeta(items) {
   if (!Array.isArray(items) || items.length === 0) {
     return items || [];
   }
@@ -1392,7 +1392,7 @@ async function enrichRecommendationItemsWithAioMeta(items) {
       if (index >= items.length) return;
 
       const item = items[index];
-      const itemId = item?.imdb_id || item?.id;
+      const itemId = item?.id || item?.imdb_id;
       const itemType = item?.type === 'series' ? 'series' : 'movie';
 
       if (!itemId || (!String(itemId).startsWith('tt') && !String(itemId).startsWith('tmdb:'))) {
@@ -1403,7 +1403,9 @@ async function enrichRecommendationItemsWithAioMeta(items) {
       const cacheKey = \`\${itemType}:\${itemId}\`;
       const cached = aioMetaPreviewCache.get(cacheKey);
       if (cached && (Date.now() - cached.timestamp) < AIOMETA_CACHE_TTL_MS) {
-        results[index] = { ...item, ...cached.meta, id: itemId, type: item.type };
+        results[index] = { ...item, ...cached.meta, id: itemId, type: item.type,
+          poster: cached.meta.poster || item.poster,
+          background: cached.meta.background || item.background || item.backdrop };
         continue;
       }
 
@@ -1424,7 +1426,9 @@ async function enrichRecommendationItemsWithAioMeta(items) {
           succeeded++;
           if (meta.poster && meta.poster !== item.poster) posterChanged++;
           aioMetaPreviewCache.set(cacheKey, { meta, timestamp: Date.now() });
-          results[index] = { ...item, ...meta, id: itemId, type: item.type };
+          results[index] = { ...item, ...meta, id: itemId, type: item.type,
+          poster: meta.poster || item.poster,
+          background: meta.background || item.background || item.backdrop };
         } else {
           results[index] = item;
         }
@@ -1468,21 +1472,29 @@ replaceOnce(
     );
     const enrichEndTime = Date.now();`,
   `    const { enrichItemsWithMetadata } = require('../utils/metadataFetcher');
-    const useAioMetaForRecommendations =
-      String(id || '').startsWith('trakt_recommendations_');
+    const useAioMetaForCatalog =
+      String(id || '').startsWith('trakt_recommendations_') || id === 'trakt_watchlist';
 
-    if (String(id || '').includes('recommendations')) {
+    if (useAioMetaForCatalog) {
       console.log('[AIOMETA] Routing decision', {
         id,
         configured: !!AIOMETA_USER_UUID,
-        useAioMetaForRecommendations
+        useAioMetaForCatalog
       });
     }
 
     let enrichedItems;
-    if (useAioMetaForRecommendations) {
-      enrichedItems = await enrichRecommendationItemsWithAioMeta(itemsResult.allItems);
-      console.log('[AIOMETA] Recommendation catalog enrichment', {
+    if (useAioMetaForCatalog) {
+      const previewItems = id === 'trakt_watchlist'
+        ? await enrichItemsWithMetadata(itemsResult.allItems, metadataSource, hasTmdbOAuth, tmdbLanguage, tmdbBearerToken)
+        : itemsResult.allItems;
+      // Keep the Trakt identity even if baseline metadata uses another ID.
+      const stableItems = previewItems.map((item, index) => ({
+        ...item, id: itemsResult.allItems[index].id || itemsResult.allItems[index].imdb_id,
+        type: itemsResult.allItems[index].type
+      }));
+      enrichedItems = await enrichCatalogItemsWithAioMeta(stableItems);
+      console.log('[AIOMETA] Catalog enrichment', {
         id,
         requested: itemsResult.allItems.length,
         enriched: enrichedItems.filter((item, index) =>
@@ -1505,7 +1517,7 @@ replaceOnce(
   '/usr/src/app/src/addon/addonBuilder.js',
   `    let metas = await convertToStremioFormat(enrichedResult, userConfig.rpdbApiKey, metadataConfig);
     const convertEndTime = Date.now();`,
-  `    const converterRpdbKey = useAioMetaForRecommendations ? null : userConfig.rpdbApiKey;
+  `    const converterRpdbKey = useAioMetaForCatalog ? null : userConfig.rpdbApiKey;
     let metas = await convertToStremioFormat(enrichedResult, converterRpdbKey, metadataConfig);
     const convertEndTime = Date.now();`
 );
@@ -1528,7 +1540,7 @@ const AIOMETA_API_CACHE_TTL_MS = 5 * 60 * 1000;
 const AIOMETA_API_CONCURRENCY = 6;
 const aioMetaApiPreviewCache = new Map();
 
-async function enrichApiRecommendationItemsWithAioMeta(items) {
+async function enrichApiCatalogItemsWithAioMeta(items) {
   if (!Array.isArray(items) || items.length === 0) return items || [];
 
   if (!AIOMETA_USER_UUID) {
@@ -1549,7 +1561,7 @@ async function enrichApiRecommendationItemsWithAioMeta(items) {
       if (index >= items.length) return;
 
       const item = items[index];
-      const itemId = item?.imdb_id || item?.id;
+      const itemId = item?.id || item?.imdb_id;
       const itemType = item?.type === 'series' ? 'series' : 'movie';
 
       if (!itemId || (!String(itemId).startsWith('tt') && !String(itemId).startsWith('tmdb:'))) {
@@ -1560,7 +1572,9 @@ async function enrichApiRecommendationItemsWithAioMeta(items) {
       const cacheKey = \`\${itemType}:\${itemId}\`;
       const cached = aioMetaApiPreviewCache.get(cacheKey);
       if (cached && (Date.now() - cached.timestamp) < AIOMETA_API_CACHE_TTL_MS) {
-        const merged = { ...item, ...cached.meta, id: itemId, type: item.type };
+        const merged = { ...item, ...cached.meta, id: itemId, type: item.type,
+          poster: cached.meta.poster || item.poster,
+          background: cached.meta.background || item.background || item.backdrop };
         results[index] = merged;
         if (cached.meta?.poster && cached.meta.poster !== item.poster) posterChanged++;
         continue;
@@ -1583,7 +1597,9 @@ async function enrichApiRecommendationItemsWithAioMeta(items) {
           succeeded++;
           if (meta.poster && meta.poster !== item.poster) posterChanged++;
           aioMetaApiPreviewCache.set(cacheKey, { meta, timestamp: Date.now() });
-          results[index] = { ...item, ...meta, id: itemId, type: item.type };
+          results[index] = { ...item, ...meta, id: itemId, type: item.type,
+          poster: meta.poster || item.poster,
+          background: meta.background || item.background || item.backdrop };
         } else {
           results[index] = item;
         }
@@ -1641,16 +1657,16 @@ replaceOnce(
         };
       }`,
   `      // Enrich items with metadata based on user's metadata source preference.
-      // Trakt recommendation catalogs use the user's AIOMetadata instance instead.
+      // Trakt recommendation and watchlist catalogs use the user's AIOMetadata instance instead.
       let enrichedResult = itemsResult;
-      const useAioMetaForRecommendations =
-        String(catalogId || '').startsWith('trakt_recommendations_');
+      const useAioMetaForCatalog =
+        String(catalogId || '').startsWith('trakt_recommendations_') || catalogId === 'trakt_watchlist';
 
-      if (String(catalogId || '').includes('recommendations')) {
+      if (useAioMetaForCatalog) {
         console.log('[AIOMETA API] Routing decision', {
           id: catalogId,
           configured: !!AIOMETA_USER_UUID,
-          useAioMetaForRecommendations
+          useAioMetaForCatalog
         });
       }
 
@@ -1661,8 +1677,17 @@ replaceOnce(
         const tmdbBearerToken = req.userConfig.tmdbBearerToken;
         
         let enrichedItems;
-        if (useAioMetaForRecommendations) {
-          enrichedItems = await enrichApiRecommendationItemsWithAioMeta(itemsResult.allItems);
+        if (useAioMetaForCatalog) {
+          const { enrichItemsWithMetadata } = require('../utils/metadataFetcher');
+          const previewItems = catalogId === 'trakt_watchlist'
+            ? await enrichItemsWithMetadata(itemsResult.allItems, metadataSource, hasTmdbOAuth, tmdbLanguage, tmdbBearerToken)
+            : itemsResult.allItems;
+          // Keep the Trakt identity even if baseline metadata uses another ID.
+          const stableItems = previewItems.map((item, index) => ({
+            ...item, id: itemsResult.allItems[index].id || itemsResult.allItems[index].imdb_id,
+            type: itemsResult.allItems[index].type
+          }));
+          enrichedItems = await enrichApiCatalogItemsWithAioMeta(stableItems);
         } else {
           const { enrichItemsWithMetadata } = require('../utils/metadataFetcher');
           enrichedItems = await enrichItemsWithMetadata(
@@ -1684,7 +1709,7 @@ replaceOnce(
 replaceOnce(
   '/usr/src/app/src/routes/api.js',
   `      let metas = await convertToStremioFormat(enrichedResult, req.userConfig.rpdbApiKey, metadataConfig);  `,
-  `      const converterRpdbKey = useAioMetaForRecommendations ? null : req.userConfig.rpdbApiKey;
+  `      const converterRpdbKey = useAioMetaForCatalog ? null : req.userConfig.rpdbApiKey;
       let metas = await convertToStremioFormat(enrichedResult, converterRpdbKey, metadataConfig);  `
 );
 
